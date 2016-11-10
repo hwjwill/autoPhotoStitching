@@ -11,9 +11,16 @@ if part ==1
     rPoints = [rPoints(:,2), rPoints(:,1)];
     
     img = imread(imname);
-    img = rgb2gray(img);
+    img = im2single(rgb2gray(img));
     H = computeH(points, rPoints);
+    result = zeros(size(img));
     
+    for r = 1:size(img, 1)
+        prime = [r * ones(1, size(img, 2)); 1:size(img, 2); ones(1, size(img, 2))];
+        p = H ^ -1 * prime;
+        result(r, :) = interp2(img, p(2, :), p(1, :));
+    end
+    imshow(result);
 end
 end
 
