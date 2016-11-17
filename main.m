@@ -1,5 +1,5 @@
 function [] = main()
-part = 2;
+part = 3;
 if part ==1
     %% Rectify an image
     % csv files contain 4 conresponding sample points to compute H matrix.
@@ -42,10 +42,84 @@ elseif part == 2
     mask(:, 1 : size(mask, 2) / 2) = 1;
     final = blend(im2single(imbase), result, mask);
     imwrite(final, filename);
+elseif part == 3
+    %% Autostitching
+    % Step 1: Finding harris points
+    imname1 = 'temp1.jpg';
+    imname2 = 'temp2.jpg';
+    im1 = imread(imname1);
+    im2 = imread(imname2);
+    [x1, y1, v1] = harris(im1);
+    [x2, y2, v2] = harris(im2);
+    
+    % Step 2: Implement Adaptive Non-Maximal Supression
+    [x1, y1, v1] = anms(x1, y1, v1, 500);
+    [x2, y2, v2] = anms(x2, y2, v2, 500);
+
+    figure(1);
+    imshow(im1);
+hold on;
+plot(x1,y1,'r.', 'markersize', 15);
+hold off;
+    figure(2);
+    imshow(im2);
+hold on;
+plot(x2,y2,'r.', 'markersize', 15);
+hold off;
 end
 end
 
 %% Helper functions
+function [xmax, ymax, vmax] = anms(x, y, v, count)
+maxRadius = zeros(size(x));
+[~, maxi] = max(v);
+maxRadius(maxi) = 99999;
+for a = 1:size(x, 1)
+   if a == maxi
+       continue;
+   end
+   r = 1;
+   val = maxAlongLine(x, y, v, r, a);
+   while val < v(a)
+       r = r + 1;
+       val = maxAlongLine(x, y, v, r, a);
+   end
+   maxRadius(a) = r;
+end
+sorted = sort(maxRadius, 'descend');
+sorted = sorted(1:count);
+indexes = zeros(count, 1);
+b = 1;
+while b <= count
+    found = find(maxRadius == sorted(b));
+    l = size(found, 1) - 1;
+    indexes(b : b + l) = found;
+    b = b + l + 1;
+end
+xmax = x(indexes);
+ymax = y(indexes);
+vmax = v(indexes);
+end
+
+function [value] = maxAlongLine(x, y, v, r, i)
+currX = x(i);
+currY = y(i);
+xmin = currX - r;
+xmax = currX + r;
+ymin = currY - r;
+ymax = currY + r;
+log1 = x == xmin & y <= ymax & y >= ymin;
+log2 = x == xmax & y <= ymax & y >= ymin;
+log3 = y == ymin & x <= xmax & y >= xmin;
+log4 = y == ymax & x <= xmax & y >= xmin;
+logic = log1 | log2 | log3 | log4;
+if any(logic) == 0
+    value = 0;
+else
+    value = max(v(logic));
+end
+end
+
 function [H] = computeH(im1_pts,im2_pts)
 A = zeros(size(im1_pts, 1) * 2, 8);
 b = zeros(size(im1_pts, 1) * 2, 1);

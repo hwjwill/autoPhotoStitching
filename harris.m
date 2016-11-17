@@ -32,9 +32,9 @@ Rnm = R.*(R == Rmax);  % supress non-max
 [y,x,v] = find(Rnm);
 
 % show 'em
-imagesc(im);
-colormap(gray);
-hold on;
-plot(x,y,'r.');
-hold off;
+% imagesc(im);
+% colormap(gray);
+% hold on;
+% plot(x,y,'r.');
+% hold off;
 end
