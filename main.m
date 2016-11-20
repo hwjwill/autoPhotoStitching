@@ -44,33 +44,211 @@ elseif part == 2
     imwrite(final, filename);
 elseif part == 3
     %% Autostitching
-    % Step 1: Finding harris points
-    imname1 = 'temp1.jpg';
-    imname2 = 'temp2.jpg';
+    imname1 = 'm1.jpg';
+    imname2 = 'car.jpg';
+    filename = 'autoMM.jpg';
     im1 = imread(imname1);
     im2 = imread(imname2);
+    
+%     black = zeros(size(im2, 1) * 3, size(im2, 2) * 3, 3);
+%     black(size(black, 1) / 3 : size(black, 1) / 3 + size(im2, 1) - 1,...
+%         size(black, 2) / 3 : size(black , 2) / 3 + size(im2, 2) - 1, :) = im2;
+%     im2 = uint8(black);
+    
     [x1, y1, v1] = harris(im1);
     [x2, y2, v2] = harris(im2);
     
-    % Step 2: Implement Adaptive Non-Maximal Supression
-    [x1, y1, v1] = anms(x1, y1, v1, 500);
-    [x2, y2, v2] = anms(x2, y2, v2, 500);
+%     figure(1);
+%     imshow(im1);
+%     hold on;
+%     plot(x1,y1,'r.', 'markersize', 15);
+%     hold off;
+%     figure(2);
+%     imshow(im2);
+%     hold on;
+%     plot(x2,y2,'r.', 'markersize', 15);
+%     hold off;  
 
-    figure(1);
-    imshow(im1);
-hold on;
-plot(x1,y1,'r.', 'markersize', 15);
-hold off;
-    figure(2);
-    imshow(im2);
-hold on;
-plot(x2,y2,'r.', 'markersize', 15);
-hold off;
+    % Step 1: Implement Adaptive Non-Maximal Supression
+    [x1, y1] = anms(x1, y1, v1, 250);
+    [x2, y2] = anms(x2, y2, v2, 250);
+
+%     figure(1);
+%     imshow(im1);
+%     hold on;
+%     plot(x1,y1,'r.', 'markersize', 15);
+%     hold off;
+%     figure(2);
+%     imshow(im2);
+%     hold on;
+%     plot(x2,y2,'r.', 'markersize', 15);
+%     hold off;
+
+    % Step 2: Feature descriptor extraction
+    im1gray = rgb2gray(im1);
+    im2gray = rgb2gray(im2);
+    [d1, xd1, yd1] = extract(x1, y1, im1gray);
+    [d2, xd2, yd2] = extract(x2, y2, im2gray);
+    
+    % Step 3: Feature Matching
+    [pts1, pts2] = match(d1, xd1, yd1, d2, xd2, yd2);
+    
+%     figure(1);
+%     imshow(im1);
+%     hold on;
+%     plot(x1,y1,'r.', 'markersize', 15);
+%     plot(pts1(:, 1), pts1(:, 2),'b.', 'markersize', 20);
+%     hold off;
+%     figure(2);
+%     imshow(im2);
+%     hold on;
+%     plot(x2,y2,'r.', 'markersize', 15);
+%     plot(pts2(:, 1), pts2(:, 2),'b.', 'markersize', 20);
+%     hold off;    
+
+    % Step 4: RANSAC
+    [H] = ransac(pts1, pts2);
+    
+    % Step 5: Blend
+    result = single(warpImage(im1, H, size(im2, 1), size(im2, 2)));
+    result(isnan(result)) = 0;
+    mask = zeros(size(result(:, :, 1)));
+    mask(:, 1 : size(mask, 2) * 2 / 3 - 40) = 1;
+    final = blend(im2single(im2), result, mask);
+    imshow(final);
+    imwrite(final, filename);
+elseif part == 4
+    %% Panorama recognition
+    imnames = ['m1.jpg', 'car.jpg', 'doe3.jpg', 'm2.jpg', 'doe4.jpg'];
+    combos = nchoosek(size(imnames, 2), 2);
+    for a = 1:combos
+        
+    end
 end
 end
 
 %% Helper functions
-function [xmax, ymax, vmax] = anms(x, y, v, count)
+function [H] = ransac(pts1, pts2)
+iterations = 100;
+pts1 = [pts1(:, 2), pts1(:, 1)];
+pts2 = [pts2(:, 2), pts2(:, 1)];
+table = zeros(iterations, size(pts1, 1) + 1);
+for a = 1:iterations
+   sample = randperm(size(pts1, 1), 4);
+   table(a, 2 : 5) = sample;
+   train1 = [pts1(sample(1), :); pts1(sample(2), :);...
+       pts1(sample(3), :); pts1(sample(4), :)];
+   train2 = [pts2(sample(1), :); pts2(sample(2), :);...
+       pts2(sample(3), :); pts2(sample(4), :)];   
+   
+   candidateH = computeH(train1, train2);
+   count = 4;
+   for b = 1:size(pts1, 1)
+       if any(sample == b)
+           continue;
+       end
+       rp = transform(pts1(b, :), candidateH);
+       if comp(rp, pts2(b, :), 1)
+           count = count + 1;
+           table(a, count + 1) = b;
+       end
+   end
+   table(a, 1) = count;
+end
+[c, ind] = max(table(:, 1));
+from = zeros(c, 2);
+to = zeros(c, 2);
+for j = 2 : c + 1
+    curr = table(ind, j);
+    from(j - 1, :) = pts1(curr, :);
+    to(j - 1, :) = pts2(curr, :);
+end
+H = computeH(from, to);
+end
+
+function [rp] = transform(pt, H)
+x = [pt(1); pt(2); 1];
+y = H * x;
+y = y / y(3);
+rp = [y(1); y(2)];
+end
+
+function [close] = comp(pt1, pt2, thres) 
+d = sqrt((pt1(1) - pt2(1)) ^ 2 + (pt1(2) - pt2(2)) ^ 2);
+if d < thres
+    close = true;
+else
+    close = false;
+end
+end
+
+function [pts1, pts2] = match(d1, xd1, yd1, d2, xd2, yd2)
+ssdTable = zeros(size(d1, 1), size(d2, 1));
+thresh = 0.3;
+for a = 1 : size(ssdTable, 1)
+    for b = 1 : size(ssdTable, 2)
+        ssdTable(a, b) = ssd(d1(a, :), d2(b, :));
+    end
+end
+nn1 = zeros(size(d1, 1), 1);
+nn2 = zeros(size(d1, 1), 1);
+potentialMatches = zeros(size(d1, 1), 1);
+for c = 1:size(nn1, 1)
+    [nn1(c), potentialMatches(c)] = min(ssdTable(c, :));
+    ssdTable(c, potentialMatches(c)) = 99999;
+    nn2(c) = min(ssdTable(c, :));
+end
+ratio = nn1 ./ nn2;
+selector = ratio < thresh;
+pts1 = [xd1(selector), yd1(selector)];
+potentialMatches = potentialMatches(selector);
+pts2 = size(pts1);
+for d = 1:size(potentialMatches, 1)
+    pts2(d, :) = [xd2(potentialMatches(d)), yd2(potentialMatches(d))];
+end
+end
+
+function [val] = ssd(array1, array2)
+val = sum((array1 - array2) .^ 2);
+end
+
+function [descriptor, xd, yd] = extract(c, r, im)
+scale = 5;
+descriptor = zeros(size(r, 1), 64);
+zerorows = zeros(size(r, 1), 1);
+for a = 1:size(r, 1)
+    rmin = r(a) - 4 * scale;
+    rmax = r(a) + 4 * scale;
+    cmin = c(a) - 4 * scale;
+    cmax = c(a) + 4 * scale;
+    if rmin < 1 || cmin < 1 || rmax > size(im, 1) || cmax > size(im, 2)
+        zerorows(a) = 1;
+        continue; 
+    end
+    patch = double(im(rmin : rmax -  1, cmin : cmax - 1));
+    patch = myGaussFilt(patch, scale);
+    temp = zeros(8, 8);
+    for count1 = 1:8
+        for count2 = 1:8
+            temp(count1, count2) = patch(count1 * scale, count2 * scale);
+        end
+    end
+    patch = reshape(temp, [1, size(temp, 1) * size(temp, 2)]);
+    avg = mean(patch);
+    sd = std(patch);
+    patch = patch - avg;
+    patch = patch / sd;
+    descriptor(a, :) = patch;
+end
+zerorows = zerorows ~= 0;
+descriptor(zerorows, :) = [];
+xd = c;
+yd = r;
+xd(zerorows) = [];
+yd(zerorows) = [];
+end
+
+function [xmax, ymax] = anms(x, y, v, count)
 maxRadius = zeros(size(x));
 [~, maxi] = max(v);
 maxRadius(maxi) = 99999;
@@ -93,12 +271,17 @@ b = 1;
 while b <= count
     found = find(maxRadius == sorted(b));
     l = size(found, 1) - 1;
-    indexes(b : b + l) = found;
+    e = b + l;
+    if e >= count
+       e = count;
+       indexes(b : e) = found(1: e - b + 1);
+    else
+       indexes(b : e) = found;
+    end
     b = b + l + 1;
 end
 xmax = x(indexes);
 ymax = y(indexes);
-vmax = v(indexes);
 end
 
 function [value] = maxAlongLine(x, y, v, r, i)
@@ -110,8 +293,8 @@ ymin = currY - r;
 ymax = currY + r;
 log1 = x == xmin & y <= ymax & y >= ymin;
 log2 = x == xmax & y <= ymax & y >= ymin;
-log3 = y == ymin & x <= xmax & y >= xmin;
-log4 = y == ymax & x <= xmax & y >= xmin;
+log3 = y == ymin & x <= xmax & x >= xmin;
+log4 = y == ymax & x <= xmax & x >= xmin;
 logic = log1 | log2 | log3 | log4;
 if any(logic) == 0
     value = 0;
