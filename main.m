@@ -1,5 +1,6 @@
 function [] = main()
-part = 3;
+%% Part selection
+part = 4;
 if part ==1
     %% Rectify an image
     % csv files contain 4 conresponding sample points to compute H matrix.
@@ -44,9 +45,13 @@ elseif part == 2
     imwrite(final, filename);
 elseif part == 3
     %% Autostitching
+    % Automatically stitch two images together based on keypoint selection
+    % and similarity comparison. After obtaining ideal matching pairs from
+    % two input images, it follows part 2 procedure to stitch them
+    % together. In my program, im1 will be matched to im2
     imname1 = 'm1.jpg';
-    imname2 = 'car.jpg';
-    filename = 'autoMM.jpg';
+    imname2 = 'm2.jpg';
+    filename = 'autoM.jpg';
     im1 = imread(imname1);
     im2 = imread(imname2);
     
@@ -115,14 +120,61 @@ elseif part == 3
     mask = zeros(size(result(:, :, 1)));
     mask(:, 1 : size(mask, 2) * 2 / 3 - 40) = 1;
     final = blend(im2single(im2), result, mask);
-    imshow(final);
     imwrite(final, filename);
 elseif part == 4
     %% Panorama recognition
-    imnames = ['m1.jpg', 'car.jpg', 'doe3.jpg', 'm2.jpg', 'doe4.jpg'];
-    combos = nchoosek(size(imnames, 2), 2);
-    for a = 1:combos
+    % Use number of keypoint matches found between all combinations of
+    % possible two sets from array of image names, and follow procedure in
+    % part 3 to stitch them to create the panorama
+    imnames = {'m1.jpg'; 'car.jpg'; 'doe2.jpg'; 'm2.jpg'; 'doe3.jpg'};
+    thres = 20;
+    choices = size(imnames, 1);
+    matchTable = zeros(choices, choices);
+    for a = 1:choices
+        for b = a + 1:choices
+            im1 = imread(imnames{a});
+            im2 = imread(imnames{b});
+            [x1, y1, v1] = harris(im1);
+            [x2, y2, v2] = harris(im2);   
+            [x1, y1] = anms(x1, y1, v1, 250);
+            [x2, y2] = anms(x2, y2, v2, 250);
+            im1gray = rgb2gray(im1);
+            im2gray = rgb2gray(im2);
+            [d1, ~, ~] = extract(x1, y1, im1gray);
+            [d2, ~, ~] = extract(x2, y2, im2gray);
+            matchTable(a, b) = numberOfMatches(d1, d2);
+        end
+    end
+    [i, j] = find(matchTable > thres);
+    for c = 1:size(i, 1)
+        filename = strcat('panorama', num2str(c), '.jpg');
+        im1 = imread(imnames{i(c)});
+        im2 = imread(imnames{j(c)});
         
+        black = zeros(size(im2, 1) * 3, size(im2, 2) * 3, 3);
+        black(size(black, 1) / 3 : size(black, 1) / 3 + size(im2, 1) - 1,...
+            size(black, 2) / 3 : size(black , 2) / 3 + size(im2, 2) - 1, :) = im2;
+        im2 = uint8(black);        
+        
+        [x1, y1, v1] = harris(im1);
+        [x2, y2, v2] = harris(im2);
+        
+        [x1, y1] = anms(x1, y1, v1, 250);
+        [x2, y2] = anms(x2, y2, v2, 250);
+        im1gray = rgb2gray(im1);
+        im2gray = rgb2gray(im2);
+        [d1, xd1, yd1] = extract(x1, y1, im1gray);
+        [d2, xd2, yd2] = extract(x2, y2, im2gray);
+
+        [pts1, pts2] = match(d1, xd1, yd1, d2, xd2, yd2);
+        [H] = ransac(pts1, pts2);
+        
+        result = single(warpImage(im1, H, size(im2, 1), size(im2, 2)));
+        result(isnan(result)) = 0;
+        mask = zeros(size(result(:, :, 1)));
+        mask(:, size(mask, 2) * 1 / 3 + 40 : end) = 1;
+        final = blend(im2single(im2), result, mask);
+        imwrite(final, filename);        
     end
 end
 end
@@ -180,6 +232,27 @@ if d < thres
 else
     close = false;
 end
+end
+
+function [num] = numberOfMatches(d1, d2)
+ssdTable = zeros(size(d1, 1), size(d2, 1));
+thresh = 0.3;
+for a = 1 : size(ssdTable, 1)
+    for b = 1 : size(ssdTable, 2)
+        ssdTable(a, b) = ssd(d1(a, :), d2(b, :));
+    end
+end
+nn1 = zeros(size(d1, 1), 1);
+nn2 = zeros(size(d1, 1), 1);
+potentialMatches = zeros(size(d1, 1), 1);
+for c = 1:size(nn1, 1)
+    [nn1(c), potentialMatches(c)] = min(ssdTable(c, :));
+    ssdTable(c, potentialMatches(c)) = 99999;
+    nn2(c) = min(ssdTable(c, :));
+end
+ratio = nn1 ./ nn2;
+selector = ratio < thresh;
+num = sum(selector);
 end
 
 function [pts1, pts2] = match(d1, xd1, yd1, d2, xd2, yd2)
