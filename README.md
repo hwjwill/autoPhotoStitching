@@ -5,7 +5,6 @@ This project aimes to explore applications of homography transformation. It is d
 ![Example](https://inst.eecs.berkeley.edu/~cs194-26/fa16/upload/files/proj7B/cs194-26-acm/autoMM.jpg)
 
 # To run code
-
 Please see comments in main.m for further definition of parameters
 ```
 main()
